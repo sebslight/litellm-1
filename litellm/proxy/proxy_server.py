@@ -62,6 +62,11 @@ else:
 
 
 def showwarning(message, category, filename, lineno, file=None, line=None):
+    # Suppress python-multipart's "Skipping data after last boundary" warning
+    # This warning appears even in patched versions (0.0.18+) where the DoS vulnerability is fixed.
+    # The warning is harmless but clutters logs.
+    if "multipart" in str(filename).lower() or "Skipping data after last boundary" in str(message):
+        return
     traceback_info = f"{filename}:{lineno}: {category.__name__}: {message}\n"
     if file is not None:
         file.write(traceback_info)
@@ -69,6 +74,10 @@ def showwarning(message, category, filename, lineno, file=None, line=None):
 
 warnings.showwarning = showwarning
 warnings.filterwarnings("default", category=UserWarning)
+# Suppress python-multipart's "Skipping data after last boundary" warning
+# This warning appears even in patched versions (0.0.18+) where the DoS vulnerability is fixed.
+# The warning is harmless but clutters logs. We suppress it via warnings filter.
+warnings.filterwarnings("ignore", message=".*Skipping data after last boundary.*", category=UserWarning)
 
 # Your client code here
 
@@ -78,8 +87,17 @@ sys.path.insert(
     0, os.path.abspath("../..")
 )  # Adds the parent directory to the system path - for litellm local dev
 
+import logging
+# Suppress python-multipart's "Skipping data after last boundary" warning
+# This warning appears even in patched versions (0.0.18+) where the DoS vulnerability is fixed.
+# The warning is harmless but clutters logs. We suppress it via logging configuration.
+# Note: Upgraded to python-multipart 0.0.20 which has better handling, but warning may still appear.
+multipart_logger = logging.getLogger("multipart")
+multipart_logger.setLevel(logging.ERROR)  # Only show errors, not warnings
+# Also add a filter to ensure warnings are not propagated to parent loggers
+multipart_logger.propagate = False
+
 try:
-    import logging
 
     import backoff
     import fastapi
