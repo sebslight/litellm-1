@@ -586,8 +586,13 @@ class BaseAzureLLM(BaseOpenAILLM):
             "azure_ad_token_provider": azure_ad_token_provider,
         }
         # init http client + SSL Verification settings
+        # Note: shared_session is an aiohttp.ClientSession, only used for async calls.
+        # Sync calls use httpx.Client which has built-in connection pooling.
+        shared_session = litellm_params.get("shared_session", None)
         if is_async is True:
-            azure_client_params["http_client"] = self._get_async_http_client()
+            azure_client_params["http_client"] = self._get_async_http_client(
+                shared_session=shared_session
+            )
         else:
             azure_client_params["http_client"] = self._get_sync_http_client()
 

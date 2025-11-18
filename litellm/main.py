@@ -5500,6 +5500,7 @@ def transcription(
     atranscription = kwargs.pop("atranscription", False)
     litellm_logging_obj: LiteLLMLoggingObj = kwargs.get("litellm_logging_obj")  # type: ignore
     extra_headers = kwargs.get("extra_headers", None)
+    shared_session = kwargs.get("shared_session", None)
     kwargs.pop("tags", [])
     non_default_params = get_non_default_transcription_params(kwargs)
 
@@ -5604,6 +5605,7 @@ def transcription(
             azure_ad_token=azure_ad_token,
             max_retries=max_retries,
             litellm_params=litellm_params_dict,
+            shared_session=shared_session,
         )
     elif custom_llm_provider == "openai" or (
         custom_llm_provider in litellm.openai_compatible_providers
@@ -5637,8 +5639,13 @@ def transcription(
             api_key=api_key,
             provider_config=provider_config,
             litellm_params=litellm_params_dict,
+            shared_session=shared_session,
         )
     elif provider_config is not None:
+        # Add shared_session to litellm_params for HTTP handler
+        if shared_session is not None:
+            litellm_params_dict["shared_session"] = shared_session
+        
         response = base_llm_http_handler.audio_transcriptions(
             model=model,
             audio_file=file,

@@ -1,8 +1,11 @@
 from litellm._uuid import uuid
-from typing import Any, Coroutine, Optional, Union
+from typing import TYPE_CHECKING, Any, Coroutine, Optional, Union
 
 from openai import AsyncAzureOpenAI, AzureOpenAI
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from aiohttp import ClientSession
 
 from litellm.litellm_core_utils.audio_utils.utils import get_audio_file_name
 from litellm.types.utils import FileTypes
@@ -33,6 +36,7 @@ class AzureAudioTranscription(AzureChatCompletion):
         azure_ad_token: Optional[str] = None,
         atranscription: bool = False,
         litellm_params: Optional[dict] = None,
+        shared_session: Optional["ClientSession"] = None,
     ) -> Union[TranscriptionResponse, Coroutine[Any, Any, TranscriptionResponse]]:
         data = {"model": model, "file": audio_file, **optional_params}
 
@@ -49,7 +53,14 @@ class AzureAudioTranscription(AzureChatCompletion):
                 logging_obj=logging_obj,
                 model=model,
                 litellm_params=litellm_params,
+                shared_session=shared_session,
             )
+
+        # Add shared_session to litellm_params for Azure client initialization
+        if litellm_params is None:
+            litellm_params = {}
+        if shared_session is not None:
+            litellm_params["shared_session"] = shared_session
 
         azure_client = self.get_azure_openai_client(
             api_version=api_version,
@@ -112,9 +123,16 @@ class AzureAudioTranscription(AzureChatCompletion):
         client=None,
         max_retries=None,
         litellm_params: Optional[dict] = None,
+        shared_session: Optional["ClientSession"] = None,
     ) -> TranscriptionResponse:
         response = None
         try:
+            # Add shared_session to litellm_params for Azure client initialization
+            if litellm_params is None:
+                litellm_params = {}
+            if shared_session is not None:
+                litellm_params["shared_session"] = shared_session
+
             async_azure_client = self.get_azure_openai_client(
                 api_version=api_version,
                 api_base=api_base,
