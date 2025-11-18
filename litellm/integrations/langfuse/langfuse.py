@@ -1,6 +1,7 @@
 #### What this does ####
 #    On success, logs events to Langfuse
 import os
+import re
 import traceback
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, cast
@@ -35,6 +36,53 @@ else:
     DynamicLoggingCache = Any
     StatefulTraceClient = Any
     Langfuse = Any
+
+
+def _redact_sensitive_info_from_string(text: str) -> str:
+    """
+    Redacts API keys and other sensitive information from error messages and tracebacks.
+    
+    This function masks common API key patterns to prevent key leakage in exception logs.
+    """
+    if not isinstance(text, str):
+        return text
+    
+    # Common API key patterns to redact
+    # Order matters: more specific patterns first, then generic ones
+    patterns = [
+        # Langfuse keys: pk-lf-... or sk-lf-... (most specific)
+        (r'pk-lf-[a-zA-Z0-9-]{20,}', 'pk-lf-[REDACTED_API_KEY]'),
+        (r'sk-lf-[a-zA-Z0-9-]{20,}', 'sk-lf-[REDACTED_API_KEY]'),
+        # Anthropic keys: sk-ant-...
+        (r'sk-ant-[a-zA-Z0-9-]{20,}', 'sk-ant-[REDACTED_API_KEY]'),
+        # OpenAI-style keys: sk-... or sk_proj-...
+        (r'sk_proj-[a-zA-Z0-9]{20,}', 'sk_proj-[REDACTED_API_KEY]'),
+        (r'sk-[a-zA-Z0-9]{20,}', 'sk-[REDACTED_API_KEY]'),
+        # Generic API keys in various formats (key=value, key:value, etc.)
+        (r'api[_-]?key["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'api_key=[REDACTED_API_KEY]'),
+        (r'secret[_-]?key["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'secret_key=[REDACTED_API_KEY]'),
+        (r'public[_-]?key["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'public_key=[REDACTED_API_KEY]'),
+        (r'private[_-]?key["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'private_key=[REDACTED_API_KEY]'),
+        # Authorization headers (Bearer tokens, API keys)
+        (r'authorization["\']?\s*[:=]\s*["\']?bearer\s+[a-zA-Z0-9_-]{20,}', 'authorization=Bearer [REDACTED_API_KEY]'),
+        (r'x-api-key["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'x-api-key=[REDACTED_API_KEY]'),
+        # Environment variable patterns that might contain keys
+        (r'LANGFUSE_[A-Z_]*KEY["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'LANGFUSE_*_KEY=[REDACTED_API_KEY]'),
+        (r'OPENAI_API_KEY["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'OPENAI_API_KEY=[REDACTED_API_KEY]'),
+        (r'ANTHROPIC_API_KEY["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'ANTHROPIC_API_KEY=[REDACTED_API_KEY]'),
+        (r'GOOGLE.*API.*KEY["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'GOOGLE_API_KEY=[REDACTED_API_KEY]'),
+        (r'AZURE.*KEY["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{20,}', 'AZURE_*_KEY=[REDACTED_API_KEY]'),
+        # Keys in dict/object representations (JSON, Python dicts, etc.)
+        (r'["\'](?:api_key|secret_key|public_key|private_key|access_key)["\']\s*:\s*["\'][a-zA-Z0-9_-]{20,}["\']', '"*_key": "[REDACTED_API_KEY]"'),
+        # AWS-style access keys (AKIA... or similar long alphanumeric)
+        (r'AKIA[0-9A-Z]{16}', 'AKIA[REDACTED_API_KEY]'),
+    ]
+    
+    redacted_text = text
+    for pattern, replacement in patterns:
+        redacted_text = re.sub(pattern, replacement, redacted_text, flags=re.IGNORECASE)
+    
+    return redacted_text
 
 
 class LangFuseLogger:
@@ -288,8 +336,10 @@ class LangFuseLogger:
 
             return {"trace_id": trace_id, "generation_id": generation_id}
         except Exception as e:
+            # Redact sensitive information from exception message before logging
+            error_msg = _redact_sensitive_info_from_string(str(e))
             verbose_logger.exception(
-                "Langfuse Layer Error(): Exception occured - {}".format(str(e))
+                "Langfuse Layer Error(): Exception occured - {}".format(error_msg)
             )
             return {"trace_id": None, "generation_id": None}
 
@@ -334,7 +384,8 @@ class LangFuseLogger:
             and isinstance(status_message, str)
         ):
             input = prompt
-            output = status_message
+            # Redact sensitive information from status_message (provider error messages may contain keys)
+            output = _redact_sensitive_info_from_string(status_message)
         elif response_obj is not None and (
             kwargs.get("call_type", None) == "embedding"
             or isinstance(response_obj, litellm.EmbeddingResponse)
@@ -774,7 +825,10 @@ class LangFuseLogger:
 
             return generation_client.trace_id, generation_id
         except Exception:
-            verbose_logger.error(f"Langfuse Layer Error - {traceback.format_exc()}")
+            # Redact sensitive information from traceback before logging
+            error_traceback = traceback.format_exc()
+            redacted_traceback = _redact_sensitive_info_from_string(error_traceback)
+            verbose_logger.error(f"Langfuse Layer Error - {redacted_traceback}")
             return None, None
 
     @staticmethod
@@ -1017,8 +1071,11 @@ def _add_prompt_to_generation_params(
                 prompt_management_metadata["prompt_id"]
             )
         except Exception as e:
+            # Redact sensitive info from exception message and traceback before logging
+            error_msg = _redact_sensitive_info_from_string(str(e))
+            error_traceback = _redact_sensitive_info_from_string(traceback.format_exc())
             verbose_logger.debug(
-                f"[Non-blocking] Langfuse Logger: Error getting prompt client for logging: {e}"
+                f"[Non-blocking] Langfuse Logger: Error getting prompt client for logging: {error_msg}\n{error_traceback}"
             )
             pass
 
