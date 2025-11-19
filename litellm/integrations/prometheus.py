@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 else:
     AsyncIOScheduler = Any
 
+# Module-level cache for lazy import to avoid per-call import overhead
+_get_end_user_id_for_cost_tracking = None
+
 
 class PrometheusLogger(CustomLogger):
     # Class variables or attributes
@@ -315,6 +318,17 @@ class PrometheusLogger(CustomLogger):
         except Exception as e:
             print_verbose(f"Got exception on init prometheus client {str(e)}")
             raise e
+
+    def _get_end_user_id_for_cost_tracking(self, *args, **kwargs):
+        """
+        Lazy-loaded wrapper for get_end_user_id_for_cost_tracking.
+        Imports and caches the function on first use to avoid per-call import overhead.
+        """
+        if not hasattr(self, '_cached_get_end_user_id_for_cost_tracking'):
+            # Lazy import to avoid loading utils.py at import time (60MB saved)
+            from litellm.utils import get_end_user_id_for_cost_tracking
+            self._cached_get_end_user_id_for_cost_tracking = get_end_user_id_for_cost_tracking
+        return self._cached_get_end_user_id_for_cost_tracking(*args, **kwargs)
 
     def _parse_prometheus_config(self) -> Dict[str, List[str]]:
         """Parse prometheus metrics configuration for label filtering and enabled metrics"""
@@ -777,10 +791,8 @@ class PrometheusLogger(CustomLogger):
         model = kwargs.get("model", "")
         litellm_params = kwargs.get("litellm_params", {}) or {}
         _metadata = litellm_params.get("metadata", {})
-        # Lazy import to avoid loading utils.py at import time (60MB saved)
-        from litellm.utils import get_end_user_id_for_cost_tracking
         
-        end_user_id = get_end_user_id_for_cost_tracking(
+        end_user_id = self._get_end_user_id_for_cost_tracking(
             litellm_params, service_type="prometheus"
         )
         user_id = standard_logging_payload["metadata"]["user_api_key_user_id"]
@@ -1166,10 +1178,8 @@ class PrometheusLogger(CustomLogger):
             "standard_logging_object", {}
         )
         litellm_params = kwargs.get("litellm_params", {}) or {}
-        # Lazy import to avoid loading utils.py at import time (60MB saved)
-        from litellm.utils import get_end_user_id_for_cost_tracking
         
-        end_user_id = get_end_user_id_for_cost_tracking(
+        end_user_id = self._get_end_user_id_for_cost_tracking(
             litellm_params, service_type="prometheus"
         )
         user_id = standard_logging_payload["metadata"]["user_api_key_user_id"]
@@ -2255,9 +2265,13 @@ def prometheus_label_factory(
 
     if UserAPIKeyLabelNames.END_USER.value in filtered_labels:
         # Lazy import to avoid loading utils.py at import time (60MB saved)
-        from litellm.utils import get_end_user_id_for_cost_tracking
+        # Cache at module level to avoid per-call import overhead
+        global _get_end_user_id_for_cost_tracking
+        if _get_end_user_id_for_cost_tracking is None:
+            from litellm.utils import get_end_user_id_for_cost_tracking
+            _get_end_user_id_for_cost_tracking = get_end_user_id_for_cost_tracking
         
-        filtered_labels["end_user"] = get_end_user_id_for_cost_tracking(
+        filtered_labels["end_user"] = _get_end_user_id_for_cost_tracking(
             litellm_params={"user_api_key_end_user_id": enum_values.end_user},
             service_type="prometheus",
         )
