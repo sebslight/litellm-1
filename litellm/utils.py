@@ -262,6 +262,26 @@ def _lazy_import_and_cache(cache_var_name: str, import_func: Callable[[], Any]) 
         globals()[cache_var_name] = cache
     return cache
 
+
+def _ensure_lazy_import(cache_var_name: str, import_func: Callable[[], Any]) -> Any:
+    """
+    Optimized helper for lazy importing in hot paths.
+    Uses direct __dict__ access which is faster than globals().get().
+    
+    Args:
+        cache_var_name: Name of the global variable to cache the imported object
+        import_func: Function that performs the import and returns the object
+    
+    Returns:
+        The cached imported object
+    """
+    module_dict = sys.modules[__name__].__dict__
+    cache = module_dict.get(cache_var_name)
+    if cache is None:
+        cache = import_func()
+        module_dict[cache_var_name] = cache
+    return cache
+
 from openai import OpenAIError as OriginalError
 
 from litellm.litellm_core_utils.llm_response_utils.response_metadata import (
@@ -1260,11 +1280,11 @@ def client(original_function):  # noqa: PLR0915
                     user_max_tokens = kwargs.get("max_tokens")
                     # Import get_modified_max_tokens lazily and cache it to avoid repeated import overhead
                     # This avoids loading token_counter (which imports default_encoding and tiktoken) at import time
-                    get_modified_max_tokens = _lazy_import_and_cache(
+                    _get_modified_max_tokens = _ensure_lazy_import(
                         "_get_modified_max_tokens",
                         lambda: __import__("litellm.litellm_core_utils.token_counter", fromlist=["get_modified_max_tokens"]).get_modified_max_tokens
                     )
-                    modified_max_tokens = get_modified_max_tokens(
+                    modified_max_tokens = _get_modified_max_tokens(
                         model=model,
                         base_model=base_model,
                         messages=messages,
@@ -1503,11 +1523,11 @@ def client(original_function):  # noqa: PLR0915
                     user_max_tokens = kwargs.get("max_tokens")
                     # Import get_modified_max_tokens lazily and cache it to avoid repeated import overhead
                     # This avoids loading token_counter (which imports default_encoding and tiktoken) at import time
-                    get_modified_max_tokens = _lazy_import_and_cache(
+                    _get_modified_max_tokens = _ensure_lazy_import(
                         "_get_modified_max_tokens",
                         lambda: __import__("litellm.litellm_core_utils.token_counter", fromlist=["get_modified_max_tokens"]).get_modified_max_tokens
                     )
-                    modified_max_tokens = get_modified_max_tokens(
+                    modified_max_tokens = _get_modified_max_tokens(
                         model=model,
                         base_model=base_model,
                         messages=messages,
@@ -1780,7 +1800,7 @@ def _select_tokenizer_helper(model: str) -> SelectTokenizerResponse:
 def _return_openai_tokenizer(model: str) -> SelectTokenizerResponse:
     # Import encoding lazily and cache it to avoid repeated import overhead
     # This avoids loading tiktoken at import time
-    encoding = _lazy_import_and_cache(
+    encoding = _ensure_lazy_import(
         "_default_encoding",
         lambda: __import__("litellm.litellm_core_utils.default_encoding", fromlist=["encoding"]).encoding
     )
@@ -1825,7 +1845,7 @@ def encode(model="", text="", custom_tokenizer: Optional[dict] = None):
     tokenizer_json = custom_tokenizer or _select_tokenizer(model=model)
     # Import Encoding lazily and cache it to avoid repeated import overhead
     # This avoids loading tiktoken at import time
-    Encoding = _lazy_import_and_cache(
+    Encoding = _ensure_lazy_import(
         "_tiktoken_encoding_type",
         lambda: __import__("tiktoken", fromlist=["Encoding"]).Encoding
     )
@@ -5846,7 +5866,7 @@ def prompt_token_calculator(model, messages):
     else:
         # Import encoding lazily and cache it to avoid repeated import overhead
         # This avoids loading tiktoken at import time
-        encoding = _lazy_import_and_cache(
+        encoding = _ensure_lazy_import(
             "_default_encoding",
             lambda: __import__("litellm.litellm_core_utils.default_encoding", fromlist=["encoding"]).encoding
         )
