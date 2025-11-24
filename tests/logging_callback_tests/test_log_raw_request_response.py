@@ -201,7 +201,9 @@ class TestLogRawRequestResponse:
         )
 
         with patch.object(langfuse_logger.Langfuse, 'trace') as mock_trace:
-            mock_trace.return_value.generation.return_value = Mock(trace_id="test-trace", generation_id="test-gen")
+            trace_client = Mock()
+            trace_client.generation.return_value = Mock(trace_id="test-trace", generation_id="test-gen")
+            mock_trace.return_value = trace_client
 
             result = langfuse_logger.log_event_on_langfuse(
                 kwargs=kwargs,
@@ -212,9 +214,15 @@ class TestLogRawRequestResponse:
             )
 
             mock_trace.assert_called_once()
-            call_kwargs = mock_trace.call_args[1]
+            assert trace_client.generation.call_args is not None, "Langfuse generation should be invoked"
+            gen_args, gen_kwargs = trace_client.generation.call_args
+            if gen_kwargs:
+                generation_metadata = gen_kwargs["metadata"]
+            else:
+                generation_metadata = getattr(gen_args[0], "metadata", {})
 
-            assert "metadata" in call_kwargs or True
+            assert generation_metadata
+            assert generation_metadata["raw_request"] == kwargs["litellm_params"]["metadata"]["raw_request"]
 
     def test_raw_request_not_added_when_flag_disabled(self):
         """Test that raw_request is not added when log_raw_request_response is False"""
