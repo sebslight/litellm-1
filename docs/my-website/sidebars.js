@@ -82,6 +82,7 @@ const sidebars = {
       type: "category",
       label: "[Beta] Prompt Management",
       items: [
+        "proxy/litellm_prompt_management",
         "proxy/custom_prompt_management",
         "proxy/native_litellm_prompt",
         "proxy/prompt_management"
@@ -454,6 +455,11 @@ const sidebars = {
           type: "doc",
           id: "provider_registration/index",
           label: "Integrate as a Model Provider",
+        },
+        {
+          type: "doc",
+          id: "provider_registration/add_model_pricing",
+          label: "Add Model Pricing & Context Window",
         },
         {
           type: "category",
